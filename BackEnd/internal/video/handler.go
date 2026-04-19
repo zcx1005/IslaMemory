@@ -35,6 +35,12 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+type CreateCommentRequest struct {
+	ParentID      *uint64 `json:"parent_id"`
+	ReplyToUserID *uint64 `json:"reply_to_user_id"`
+	Content       string  `json:"content" binding:"required"`
+}
+
 // List 处理 GET /api/v1/videos
 // 支持：分页、分类筛选、关键词搜索、排序
 func (h *Handler) List(c *gin.Context) {
@@ -203,6 +209,212 @@ func (h *Handler) Upload(c *gin.Context) {
 			"status":           video.Status,
 		},
 	})
+}
+
+// Like 视频点赞功能
+func (h *Handler) Like(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	liked, err := h.service.LikeVideo(c.Request.Context(), publicID, userID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "like failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{"liked": liked},
+	})
+}
+
+// Unlike 取消点赞
+func (h *Handler) Unlike(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	unliked, err := h.service.UnlikeVideo(c.Request.Context(), publicID, userID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "unlike failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{"unliked": unliked},
+	})
+}
+
+// Favorite 视频收藏
+func (h *Handler) Favorite(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	favorited, err := h.service.FavoriteVideo(c.Request.Context(), publicID, userID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "favorite failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{"favorited": favorited},
+	})
+}
+
+// Unfavorite 取消收藏
+func (h *Handler) Unfavorite(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	unfavorited, err := h.service.UnfavoriteVideo(c.Request.Context(), publicID, userID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "unfavorite failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{"unfavorited": unfavorited},
+	})
+}
+
+// ListComments 视频评论
+func (h *Handler) ListComments(c *gin.Context) {
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	comments, err := h.service.ListComments(c.Request.Context(), publicID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "list comments failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{
+			"list": comments,
+		},
+	})
+}
+
+// CreateComment 创建评论
+func (h *Handler) CreateComment(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	var req CreateCommentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid request"})
+		return
+	}
+
+	item, err := h.service.CreateComment(c.Request.Context(), CreateCommentInput{
+		PublicID:      publicID,
+		UserID:        userID,
+		ParentID:      req.ParentID,
+		ReplyToUserID: req.ReplyToUserID,
+		Content:       req.Content,
+	})
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound, ErrCommentNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		case ErrInvalidCommentInput:
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "create comment failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "comment created",
+		"data": item,
+	})
+}
+
+func getUserID(c *gin.Context) (uint64, bool) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "unauthorized"})
+		return 0, false
+	}
+	userID, ok := userIDVal.(uint64)
+	if !ok || userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid user id"})
+		return 0, false
+	}
+	return userID, true
 }
 
 func isAllowedVideoExt(ext string) bool {

@@ -80,9 +80,20 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 	// 登录用户上视频接口
 	uploadGroup := api.Group("/videos")
+	uploadGroup.GET("/:public_id/comments", videoHandler.ListComments)
 	uploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
 	{
 		uploadGroup.POST("/upload", videoHandler.Upload)
+		// 点赞
+		uploadGroup.POST("/:public_id/like", videoHandler.Like)
+		uploadGroup.DELETE("/:public_id/like", videoHandler.Unlike)
+
+		// 收藏
+		uploadGroup.POST("/:public_id/favorite", videoHandler.Favorite)
+		uploadGroup.DELETE("/:public_id/favorite", videoHandler.Unfavorite)
+
+		// 评论（列表 + 发表评论/回复）
+		uploadGroup.POST("/:public_id/comments", videoHandler.CreateComment)
 	}
 
 	return r

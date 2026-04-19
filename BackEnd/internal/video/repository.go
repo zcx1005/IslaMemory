@@ -1,6 +1,9 @@
 package video
 
 import (
+	"IslaMemory/BackEnd/internal/comment"
+	"IslaMemory/BackEnd/internal/favorite"
+	"IslaMemory/BackEnd/internal/like"
 	"context"
 	"time"
 
@@ -201,4 +204,193 @@ func (r *Repository) IncreasePlayCount(ctx context.Context, publicID string) err
 		Where("deleted_at IS NULL").
 		UpdateColumn("play_count", gorm.Expr("play_count + 1")).
 		Error
+}
+
+// LikeVideo 视频点赞
+func (r *Repository) LikeVideo(ctx context.Context, videoID, userID uint64) (bool, error) {
+	liked := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where(&like.VideoLike{
+			VideoID: videoID,
+			UserID:  userID,
+		}).FirstOrCreate(&like.VideoLike{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		liked = true
+		return tx.Model(&Video{}).
+			Where("id = ?", videoID).
+			UpdateColumn("like_count", gorm.Expr("like_count + 1")).
+			Error
+	})
+	return liked, err
+}
+
+// UnlikeVideo 取消点赞
+func (r *Repository) UnlikeVideo(ctx context.Context, videoID, userID uint64) (bool, error) {
+	unliked := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("video_id = ? AND user_id = ?", videoID, userID).Delete(&like.VideoLike{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		unliked = true
+		return tx.Model(&Video{}).
+			Where("id = ?", videoID).
+			UpdateColumn("like_count", gorm.Expr("IF(like_count > 0, like_count - 1, 0)")).
+			Error
+	})
+	return unliked, err
+}
+
+// FavoriteVideo 收藏视频
+func (r *Repository) FavoriteVideo(ctx context.Context, videoID, userID uint64) (bool, error) {
+	favorited := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where(&favorite.VideoFavorite{
+			VideoID: videoID,
+			UserID:  userID,
+		}).FirstOrCreate(&favorite.VideoFavorite{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		favorited = true
+		return tx.Model(&Video{}).
+			Where("id = ?", videoID).
+			UpdateColumn("favorite_count", gorm.Expr("favorite_count + 1")).
+			Error
+	})
+	return favorited, err
+}
+
+// UnfavoriteVideo 取消收藏
+func (r *Repository) UnfavoriteVideo(ctx context.Context, videoID, userID uint64) (bool, error) {
+	unfavorited := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("video_id = ? AND user_id = ?", videoID, userID).Delete(&favorite.VideoFavorite{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		unfavorited = true
+		return tx.Model(&Video{}).
+			Where("id = ?", videoID).
+			UpdateColumn("favorite_count", gorm.Expr("IF(favorite_count > 0, favorite_count - 1, 0)")).
+			Error
+	})
+	return unfavorited, err
+}
+
+// GetActiveCommentByID 视频评论
+func (r *Repository) GetActiveCommentByID(ctx context.Context, commentID uint64) (*comment.VideoComment, error) {
+	var cmt comment.VideoComment
+	err := r.db.WithContext(ctx).
+		Where("id = ?", commentID).
+		Where("deleted_at IS NULL").
+		Where("status = ?", 1).
+		First(&cmt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cmt, nil
+}
+
+type CreateCommentParams struct {
+	VideoID       uint64
+	UserID        uint64
+	ParentID      *uint64
+	RootID        *uint64
+	ReplyToUserID *uint64
+	Content       string
+}
+
+// CreateComment 创建评论
+func (r *Repository) CreateComment(ctx context.Context, params CreateCommentParams) (*comment.VideoComment, error) {
+	cmt := &comment.VideoComment{
+		VideoID:       params.VideoID,
+		UserID:        params.UserID,
+		ParentID:      params.ParentID,
+		RootID:        params.RootID,
+		ReplyToUserID: params.ReplyToUserID,
+		Content:       params.Content,
+		Status:        1,
+	}
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(cmt).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Video{}).
+			Where("id = ?", params.VideoID).
+			UpdateColumn("comment_count", gorm.Expr("comment_count + 1")).
+			Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cmt, nil
+}
+
+type CommentRow struct {
+	ID              uint64    `gorm:"column:id"`
+	VideoID         uint64    `gorm:"column:video_id"`
+	UserID          uint64    `gorm:"column:user_id"`
+	ParentID        *uint64   `gorm:"column:parent_id"`
+	RootID          *uint64   `gorm:"column:root_id"`
+	ReplyToUserID   *uint64   `gorm:"column:reply_to_user_id"`
+	Content         string    `gorm:"column:content"`
+	LikeCount       uint64    `gorm:"column:like_count"`
+	Status          uint8     `gorm:"column:status"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+	Username        string    `gorm:"column:username"`
+	AvatarURL       string    `gorm:"column:avatar_url"`
+	ReplyToUsername *string   `gorm:"column:reply_to_username"`
+	ReplyToAvatar   *string   `gorm:"column:reply_to_avatar_url"`
+}
+
+// ListCommentsByVideoID 视频对应评论
+func (r *Repository) ListCommentsByVideoID(ctx context.Context, videoID uint64) ([]CommentRow, error) {
+	var rows []CommentRow
+	err := r.db.WithContext(ctx).
+		Table("video_comments AS vc").
+		Joins("JOIN users AS u ON u.id = vc.user_id").
+		Joins("LEFT JOIN users AS ru ON ru.id = vc.reply_to_user_id").
+		Where("vc.video_id = ?", videoID).
+		Where("vc.deleted_at IS NULL").
+		Where("vc.status = ?", 1).
+		Order("vc.created_at ASC, vc.id ASC").
+		Select(`
+			vc.id,
+			vc.video_id,
+			vc.user_id,
+			vc.parent_id,
+			vc.root_id,
+			vc.reply_to_user_id,
+			vc.content,
+			vc.like_count,
+			vc.status,
+			vc.created_at,
+			vc.updated_at,
+			u.username,
+			u.avatar_url,
+			ru.username AS reply_to_username,
+			ru.avatar_url AS reply_to_avatar_url
+		`).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

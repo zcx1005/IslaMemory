@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -82,6 +83,37 @@ type CreateVideoInput struct {
 	SourceVideoURL string
 	FileSizeBytes  uint64
 	Status         uint8
+}
+
+var (
+	ErrCommentNotFound     = errors.New("comment not found")
+	ErrInvalidCommentInput = errors.New("invalid comment input")
+)
+
+// 评论结构体
+type CommentItem struct {
+	ID              uint64        `json:"id"`
+	VideoID         uint64        `json:"video_id"`
+	UserID          uint64        `json:"user_id"`
+	Username        string        `json:"username"`
+	AvatarURL       string        `json:"avatar_url"`
+	ParentID        *uint64       `json:"parent_id"`
+	RootID          *uint64       `json:"root_id"`
+	ReplyToUserID   *uint64       `json:"reply_to_user_id"`
+	ReplyToUsername *string       `json:"reply_to_username"`
+	Content         string        `json:"content"`
+	LikeCount       uint64        `json:"like_count"`
+	CreatedAt       string        `json:"created_at"`
+	UpdatedAt       string        `json:"updated_at"`
+	Replies         []CommentItem `json:"replies"`
+}
+
+type CreateCommentInput struct {
+	PublicID      string
+	UserID        uint64
+	ParentID      *uint64
+	ReplyToUserID *uint64
+	Content       string
 }
 
 // normalizeListInput 统一处理分页和排序默认值
@@ -230,4 +262,182 @@ func (s *Service) CreateUploadedVideo(ctx context.Context, in CreateVideoInput) 
 	}
 
 	return video, nil
+}
+
+// LikeVideo 视频点赞
+func (s *Service) LikeVideo(ctx context.Context, publicID string, userID uint64) (bool, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, ErrVideoNotFound
+		}
+		return false, err
+	}
+	return s.repo.LikeVideo(ctx, video.ID, userID)
+}
+
+// UnlikeVideo 取消点赞
+func (s *Service) UnlikeVideo(ctx context.Context, publicID string, userID uint64) (bool, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, ErrVideoNotFound
+		}
+		return false, err
+	}
+	return s.repo.UnlikeVideo(ctx, video.ID, userID)
+}
+
+// FavoriteVideo 收藏视频
+func (s *Service) FavoriteVideo(ctx context.Context, publicID string, userID uint64) (bool, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, ErrVideoNotFound
+		}
+		return false, err
+	}
+	return s.repo.FavoriteVideo(ctx, video.ID, userID)
+}
+
+// UnfavoriteVideo 取消收藏
+func (s *Service) UnfavoriteVideo(ctx context.Context, publicID string, userID uint64) (bool, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, ErrVideoNotFound
+		}
+		return false, err
+	}
+	return s.repo.UnfavoriteVideo(ctx, video.ID, userID)
+}
+
+// CreateComment 创建评论
+func (s *Service) CreateComment(ctx context.Context, in CreateCommentInput) (*CommentItem, error) {
+	content := strings.TrimSpace(in.Content)
+	if in.PublicID == "" || in.UserID == 0 || content == "" {
+		return nil, ErrInvalidCommentInput
+	}
+
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, in.PublicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVideoNotFound
+		}
+		return nil, err
+	}
+
+	var rootID *uint64
+	if in.ParentID != nil {
+		parent, err := s.repo.GetActiveCommentByID(ctx, *in.ParentID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrCommentNotFound
+			}
+			return nil, err
+		}
+		if parent.VideoID != video.ID {
+			return nil, ErrInvalidCommentInput
+		}
+
+		if parent.RootID == nil {
+			id := parent.ID
+			rootID = &id
+		} else {
+			rootID = parent.RootID
+		}
+
+		if in.ReplyToUserID == nil {
+			replyUID := parent.UserID
+			in.ReplyToUserID = &replyUID
+		}
+	}
+
+	cmt, err := s.repo.CreateComment(ctx, CreateCommentParams{
+		VideoID:       video.ID,
+		UserID:        in.UserID,
+		ParentID:      in.ParentID,
+		RootID:        rootID,
+		ReplyToUserID: in.ReplyToUserID,
+		Content:       content,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	item := &CommentItem{
+		ID:            cmt.ID,
+		VideoID:       cmt.VideoID,
+		UserID:        cmt.UserID,
+		ParentID:      cmt.ParentID,
+		RootID:        cmt.RootID,
+		ReplyToUserID: cmt.ReplyToUserID,
+		Content:       cmt.Content,
+		LikeCount:     cmt.LikeCount,
+		CreatedAt:     cmt.CreatedAt.Format(timeFormat),
+		UpdatedAt:     cmt.UpdatedAt.Format(timeFormat),
+		Replies:       make([]CommentItem, 0),
+	}
+	return item, nil
+}
+
+// ListComments 评论列表
+func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentItem, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVideoNotFound
+		}
+		return nil, err
+	}
+
+	rows, err := s.repo.ListCommentsByVideoID(ctx, video.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	rootList := make([]CommentItem, 0)
+	rootMap := make(map[uint64]*CommentItem)
+	replyBucket := make(map[uint64][]CommentItem)
+
+	for _, row := range rows {
+		item := CommentItem{
+			ID:              row.ID,
+			VideoID:         row.VideoID,
+			UserID:          row.UserID,
+			Username:        row.Username,
+			AvatarURL:       row.AvatarURL,
+			ParentID:        row.ParentID,
+			RootID:          row.RootID,
+			ReplyToUserID:   row.ReplyToUserID,
+			ReplyToUsername: row.ReplyToUsername,
+			Content:         row.Content,
+			LikeCount:       row.LikeCount,
+			CreatedAt:       row.CreatedAt.Format(timeFormat),
+			UpdatedAt:       row.UpdatedAt.Format(timeFormat),
+			Replies:         make([]CommentItem, 0),
+		}
+
+		if row.ParentID == nil {
+			rootList = append(rootList, item)
+			rootMap[item.ID] = &rootList[len(rootList)-1]
+			continue
+		}
+
+		root := row.RootID
+		if root == nil {
+			root = row.ParentID
+		}
+		if root != nil {
+			replyBucket[*root] = append(replyBucket[*root], item)
+		}
+	}
+
+	for rootID, replies := range replyBucket {
+		if root, ok := rootMap[rootID]; ok {
+			root.Replies = append(root.Replies, replies...)
+		}
+	}
+
+	return rootList, nil
 }
