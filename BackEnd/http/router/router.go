@@ -13,7 +13,7 @@ import (
 
 func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	r := gin.Default()
-
+	r.Static("/static", "./storage")
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "pong",
@@ -77,6 +77,13 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.GET("/videos", videoHandler.List)
 	api.GET("/videos/:public_id", videoHandler.Detail)
 	api.POST("/videos/:public_id/play", videoHandler.IncreasePlay)
+
+	// 登录用户上视频接口
+	uploadGroup := api.Group("/videos")
+	uploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
+	{
+		uploadGroup.POST("/upload", videoHandler.Upload)
+	}
 
 	return r
 }

@@ -16,6 +16,11 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// CreateVideo 创建视频记录
+func (r *Repository) CreateVideo(ctx context.Context, v *Video) error {
+	return r.db.WithContext(ctx).Create(v).Error
+}
+
 // ListParams 列表查询参数
 type ListParams struct {
 	Page         int
