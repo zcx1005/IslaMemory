@@ -13,6 +13,8 @@ import (
 
 func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	r := gin.Default()
+	// 把 ./storage 目录映射为 /static，供本地上传文件访问
+	r.Static("/static", "./storage")
 
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -77,6 +79,13 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.GET("/videos", videoHandler.List)
 	api.GET("/videos/:public_id", videoHandler.Detail)
 	api.POST("/videos/:public_id/play", videoHandler.IncreasePlay)
+
+	// 登录用户上传接口（第一版：本地存储）
+	videoUploadGroup := api.Group("/videos")
+	videoUploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
+	{
+		videoUploadGroup.POST("/upload", videoHandler.Upload)
+	}
 
 	return r
 }

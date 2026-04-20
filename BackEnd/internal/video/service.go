@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrVideoNotFound = errors.New("video not found")
+	ErrInvalidInput  = errors.New("invalid video input")
 )
 
 // Service 负责 video 业务逻辑
@@ -69,6 +70,18 @@ type VideoDetail struct {
 	PlaybackURL     string  `json:"playback_url"`
 	PublishedAt     *string `json:"published_at"`
 	CreatedAt       string  `json:"created_at"`
+}
+
+// CreateVideoInput 创建视频入参
+type CreateVideoInput struct {
+	PublicID       string
+	UserID         uint64
+	CategoryID     uint64
+	Title          string
+	Description    string
+	SourceVideoURL string
+	FileSizeBytes  uint64
+	Status         uint8
 }
 
 // normalizeListInput 统一处理分页和排序默认值
@@ -181,6 +194,40 @@ func (s *Service) GetPublicVideoDetail(ctx context.Context, publicID string) (*V
 // TODO: 第一版先直接加；后面你接 Redis 后，可以在这里加播放去重逻辑
 func (s *Service) IncreasePlayCount(ctx context.Context, publicID string) error {
 	return s.repo.IncreasePlayCount(ctx, publicID)
+}
+
+// CreateUploadedVideo 创建上传视频记录
+// 第一版本地上传：
+// - playback_url 先留空
+// - playback_type=0 表示直接播放原文件
+// - 状态先默认已发布（2），便于快速联调
+func (s *Service) CreateUploadedVideo(ctx context.Context, in CreateVideoInput) (*Video, error) {
+	if in.PublicID == "" || in.UserID == 0 || in.CategoryID == 0 || in.Title == "" || in.SourceVideoURL == "" {
+		return nil, ErrInvalidInput
+	}
+
+	status := in.Status
+	if status == 0 {
+		status = 2
+	}
+
+	video := &Video{
+		PublicID:       in.PublicID,
+		UserID:         in.UserID,
+		CategoryID:     in.CategoryID,
+		Title:          in.Title,
+		Description:    in.Description,
+		SourceVideoURL: in.SourceVideoURL,
+		PlaybackType:   0,
+		Status:         status,
+		FileSizeBytes:  in.FileSizeBytes,
+	}
+
+	if err := s.repo.CreateVideo(ctx, video); err != nil {
+		return nil, err
+	}
+
+	return video, nil
 }
 
 const timeFormat = "2006-01-02 15:04:05"
