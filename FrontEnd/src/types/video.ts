@@ -21,6 +21,8 @@ export interface VideoListItem {
     category_slug: string
     published_at: string | null
     created_at: string
+    username?: string
+    uploader_username?: string
 }
 
 export interface VideoListData {
@@ -49,4 +51,6 @@ export interface VideoDetail {
     playback_url: string
     published_at: string | null
     created_at: string
+    username?: string
+    uploader_username?: string
 }
