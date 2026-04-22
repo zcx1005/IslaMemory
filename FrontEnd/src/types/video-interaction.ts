@@ -24,3 +24,8 @@ export interface CommentItem {
 export interface CommentListResp {
     list: CommentItem[]
 }
+
+export interface InteractionStateResp {
+    liked: boolean
+    favorited: boolean
+}

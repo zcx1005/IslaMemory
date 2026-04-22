@@ -53,6 +53,9 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	userGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
 	{
 		userGroup.GET("/me", userHandler.Me)
+		userGroup.PUT("/me", userHandler.UpdateMe)
+		userGroup.GET("/me/favorites", userHandler.MyFavorites)
+		userGroup.GET("/me/uploads", userHandler.MyUploads)
 		userGroup.POST("/me/password", userHandler.ChangePassword)
 	}
 
@@ -84,6 +87,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	uploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
 	{
 		uploadGroup.POST("/upload", videoHandler.Upload)
+		uploadGroup.GET("/:public_id/interaction", videoHandler.InteractionState)
 		// 点赞
 		uploadGroup.POST("/:public_id/like", videoHandler.Like)
 		uploadGroup.DELETE("/:public_id/like", videoHandler.Unlike)

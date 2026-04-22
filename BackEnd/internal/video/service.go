@@ -78,6 +78,7 @@ type CreateVideoInput struct {
 	PublicID       string
 	UserID         uint64
 	CategoryID     uint64
+	CategorySlug   string
 	Title          string
 	Description    string
 	SourceVideoURL string
@@ -236,7 +237,20 @@ const timeFormat = "2006-01-02 15:04:05"
 // - playback_type=0 表示直接播放原文件
 // - 状态先默认已发布（2），便于快速联调
 func (s *Service) CreateUploadedVideo(ctx context.Context, in CreateVideoInput) (*Video, error) {
-	if in.PublicID == "" || in.UserID == 0 || in.CategoryID == 0 || in.Title == "" || in.SourceVideoURL == "" {
+	if in.PublicID == "" || in.UserID == 0 || in.Title == "" || in.SourceVideoURL == "" {
+		return nil, ErrInvalidInput
+	}
+	if in.CategoryID == 0 && in.CategorySlug != "" {
+		categoryID, err := s.repo.GetCategoryIDBySlug(ctx, in.CategorySlug)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrInvalidInput
+			}
+			return nil, err
+		}
+		in.CategoryID = categoryID
+	}
+	if in.CategoryID == 0 {
 		return nil, ErrInvalidInput
 	}
 
@@ -262,6 +276,30 @@ func (s *Service) CreateUploadedVideo(ctx context.Context, in CreateVideoInput) 
 	}
 
 	return video, nil
+}
+
+type InteractionState struct {
+	Liked     bool `json:"liked"`
+	Favorited bool `json:"favorited"`
+}
+
+func (s *Service) GetInteractionState(ctx context.Context, publicID string, userID uint64) (*InteractionState, error) {
+	video, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVideoNotFound
+		}
+		return nil, err
+	}
+	liked, err := s.repo.IsVideoLikedByUser(ctx, video.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	favorited, err := s.repo.IsVideoFavoritedByUser(ctx, video.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &InteractionState{Liked: liked, Favorited: favorited}, nil
 }
 
 // LikeVideo 视频点赞
@@ -397,7 +435,7 @@ func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentI
 	}
 
 	rootList := make([]CommentItem, 0)
-	rootMap := make(map[uint64]*CommentItem)
+	rootIndexMap := make(map[uint64]int)
 	replyBucket := make(map[uint64][]CommentItem)
 
 	for _, row := range rows {
@@ -420,7 +458,7 @@ func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentI
 
 		if row.ParentID == nil {
 			rootList = append(rootList, item)
-			rootMap[item.ID] = &rootList[len(rootList)-1]
+			rootIndexMap[item.ID] = len(rootList) - 1
 			continue
 		}
 
@@ -434,8 +472,8 @@ func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentI
 	}
 
 	for rootID, replies := range replyBucket {
-		if root, ok := rootMap[rootID]; ok {
-			root.Replies = append(root.Replies, replies...)
+		if idx, ok := rootIndexMap[rootID]; ok {
+			rootList[idx].Replies = append(rootList[idx].Replies, replies...)
 		}
 	}
 

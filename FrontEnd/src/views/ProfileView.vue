@@ -26,7 +26,7 @@
           />
           <p>头像预览</p>
         </div>
-
+    </div>
         <div class="crop-controls">
           <label>缩放 {{ cropScale }}%</label>
           <input v-model.number="cropScale" type="range" min="0" max="300" step="1" />
@@ -37,7 +37,6 @@
           <label>纵向位置 {{ cropY }}%</label>
           <input v-model.number="cropY" type="range" min="-100" max="100" step="1" />
         </div>
-      </div>
 
       <button @click="saveProfile">保存修改</button>
       <p v-if="message">{{ message }}</p>
@@ -75,6 +74,7 @@ const videos = ref<VideoListItem[]>([])
 const profileForm = reactive({ username: '', avatar_url: '' })
 
 const avatarSource = ref('')
+const selectedAvatarFile = ref<File | null>(null)
 const cropScale = ref(140)
 const cropX = ref(50)
 const cropY = ref(50)
@@ -119,6 +119,7 @@ function onAvatarSelect(e: Event) {
   const file = target.files?.[0]
   if (!file) return
 
+  selectedAvatarFile.value = file
   const reader = new FileReader()
   reader.onload = () => {
     avatarSource.value = String(reader.result || '')
@@ -129,15 +130,15 @@ function onAvatarSelect(e: Event) {
   reader.readAsDataURL(file)
 }
 
-async function buildCroppedAvatar(): Promise<string> {
-  if (!avatarSource.value) return profileForm.avatar_url
+async function buildCroppedAvatarFile(): Promise<File | null> {
+  if (!avatarSource.value) return selectedAvatarFile.value
 
   const canvas = document.createElement('canvas')
   const size = 256
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')
-  if (!ctx) return profileForm.avatar_url
+  if (!ctx) return selectedAvatarFile.value
 
   const img = new Image()
   const loaded = new Promise<void>((resolve, reject) => {
@@ -155,16 +156,31 @@ async function buildCroppedAvatar(): Promise<string> {
 
   ctx.clearRect(0, 0, size, size)
   ctx.drawImage(img, -x, -y, w, h)
-  return canvas.toDataURL('image/png')
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((result) => resolve(result), 'image/png', 0.92)
+  })
+  if (!blob) return selectedAvatarFile.value
+
+  return new File([blob], `avatar-${Date.now()}.png`, { type: 'image/png' })
 }
 
 async function saveProfile() {
   message.value = ''
-  const avatar = await buildCroppedAvatar()
-  const res = await updateMyProfile({ username: profileForm.username.trim(), avatar_url: avatar })
+  const payload: { username?: string; avatar_file?: File } = {}
+  const name = profileForm.username.trim()
+  if (name) payload.username = name
+  if (selectedAvatarFile.value || avatarSource.value) {
+    const cropped = await buildCroppedAvatarFile()
+    if (cropped) payload.avatar_file = cropped
+  }
+
+  const res = await updateMyProfile(payload)
   if (res.code === 200) {
-    profileForm.avatar_url = avatar
-    updateUserProfile({ username: profileForm.username.trim(), avatar_url: avatar })
+    profileForm.avatar_url = res.data?.avatar_url || profileForm.avatar_url
+    selectedAvatarFile.value = null
+    avatarSource.value = profileForm.avatar_url
+    updateUserProfile({ username: profileForm.username.trim(), avatar_url: profileForm.avatar_url })
     message.value = '保存成功'
     return
   }

@@ -19,6 +19,23 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) GetCategoryIDBySlug(ctx context.Context, slug string) (uint64, error) {
+	var row struct {
+		ID uint64 `gorm:"column:id"`
+	}
+	err := r.db.WithContext(ctx).
+		Table("categories").
+		Select("id").
+		Where("slug = ?", slug).
+		Where("status = ?", 1).
+		Where("deleted_at IS NULL").
+		First(&row).Error
+	if err != nil {
+		return 0, err
+	}
+	return row.ID, nil
+}
+
 // CreateVideo 创建视频记录
 func (r *Repository) CreateVideo(ctx context.Context, v *Video) error {
 	return r.db.WithContext(ctx).Create(v).Error
@@ -204,6 +221,30 @@ func (r *Repository) IncreasePlayCount(ctx context.Context, publicID string) err
 		Where("deleted_at IS NULL").
 		UpdateColumn("play_count", gorm.Expr("play_count + 1")).
 		Error
+}
+
+func (r *Repository) IsVideoLikedByUser(ctx context.Context, videoID, userID uint64) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("video_likes").
+		Where("video_id = ? AND user_id = ?", videoID, userID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *Repository) IsVideoFavoritedByUser(ctx context.Context, videoID, userID uint64) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("video_favorites").
+		Where("video_id = ? AND user_id = ?", videoID, userID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // LikeVideo 视频点赞

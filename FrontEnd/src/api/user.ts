@@ -5,6 +5,7 @@ import type { UserProfile } from '@/api/auth'
 export interface UpdateProfilePayload {
     username?: string
     avatar_url?: string
+    avatar_file?: File
 }
 
 export interface UploadVideoPayload {
@@ -15,7 +16,21 @@ export interface UploadVideoPayload {
 }
 
 export function updateMyProfile(payload: UpdateProfilePayload) {
-    return request.put<any, ApiResponse<UserProfile>>('/api/v1/users/me', payload)
+    const formData = new FormData()
+    if (payload.username !== undefined) {
+        formData.append('username', payload.username)
+    }
+    if (payload.avatar_file) {
+        formData.append('avatar', payload.avatar_file)
+    } else if (payload.avatar_url !== undefined) {
+        formData.append('avatar_url', payload.avatar_url)
+    }
+
+    return request.put<any, ApiResponse<UserProfile>>('/api/v1/users/me', formData, {
+        headers: {
+            'Content-Type': 'multipart/form-data',
+        },
+    })
 }
 
 export function getMyFavoriteVideos(params?: { page?: number; page_size?: number }) {

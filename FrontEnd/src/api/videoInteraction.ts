@@ -1,10 +1,17 @@
 import request from '@/api/request'
-import type { ApiResp, CommentItem, CommentListResp } from '@/types/video-interaction'
+import type { ApiResp, CommentItem, CommentListResp, InteractionStateResp } from '@/types/video-interaction'
 
 function assertPublicId(publicId: string) {
     if (!publicId || !publicId.trim()) {
         throw new Error('publicId 不能为空')
     }
+}
+
+export function getInteractionState(publicId: string) {
+    assertPublicId(publicId)
+    return request.get<any, ApiResp<InteractionStateResp>>(
+        `/api/v1/videos/${publicId}/interaction`
+    )
 }
 
 export function likeVideo(publicId: string) {

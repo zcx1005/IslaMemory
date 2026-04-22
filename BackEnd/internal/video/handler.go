@@ -122,10 +122,11 @@ func (h *Handler) Upload(c *gin.Context) {
 	title := strings.TrimSpace(c.PostForm("title"))
 	description := strings.TrimSpace(c.PostForm("description"))
 	categoryIDStr := strings.TrimSpace(c.PostForm("category_id"))
+	categorySlug := strings.TrimSpace(c.PostForm("category_slug"))
 	categoryID, _ := strconv.ParseUint(categoryIDStr, 10, 64)
 
-	if title == "" || categoryID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "title and category_id are required"})
+	if title == "" || (categoryID == 0 && categorySlug == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "title and category are required"})
 		return
 	}
 
@@ -180,6 +181,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		PublicID:       publicID,
 		UserID:         userID,
 		CategoryID:     categoryID,
+		CategorySlug:   categorySlug,
 		Title:          title,
 		Description:    description,
 		SourceVideoURL: sourceURL,
@@ -209,6 +211,32 @@ func (h *Handler) Upload(c *gin.Context) {
 			"status":           video.Status,
 		},
 	})
+}
+
+// InteractionState 获取当前用户对视频的点赞/收藏状态
+func (h *Handler) InteractionState(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		return
+	}
+	publicID := c.Param("public_id")
+	if publicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid public_id"})
+		return
+	}
+
+	state, err := h.service.GetInteractionState(c.Request.Context(), publicID, userID)
+	if err != nil {
+		switch err {
+		case ErrVideoNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "get interaction state failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "success", "data": state})
 }
 
 // Like 视频点赞功能
