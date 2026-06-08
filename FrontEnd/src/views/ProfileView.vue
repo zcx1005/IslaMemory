@@ -5,6 +5,7 @@
       <button :class="{ active: tab === 'info' }" @click="setTab('info')">个人信息</button>
       <button :class="{ active: tab === 'favorites' }" @click="setTab('favorites')">收藏的视频</button>
       <button :class="{ active: tab === 'uploads' }" @click="setTab('uploads')">上传的视频</button>
+      <button :class="{ active: tab === 'history' }" @click="setTab('history')">历史观看</button>
     </div>
 
     <div v-if="tab === 'info'" class="panel">
@@ -26,17 +27,13 @@
           />
           <p>头像预览</p>
         </div>
-    </div>
-        <div class="crop-controls">
-          <label>缩放 {{ cropScale }}%</label>
-          <input v-model.number="cropScale" type="range" min="0" max="300" step="1" />
-
-          <label>横向位置 {{ cropX }}%</label>
-          <input v-model.number="cropX" type="range" min="-100" max="100" step="1" />
-
-          <label>纵向位置 {{ cropY }}%</label>
-          <input v-model.number="cropY" type="range" min="-100" max="100" step="1" />
-        </div>
+      </div>
+      <div class="crop-controls">
+        <label>缩放 {{ cropScale }}%</label>
+        <input v-model.number="cropScale" type="range" min="0" max="300" step="1" />
+        <label>纵向位置 {{ cropY }}%</label>
+        <input v-model.number="cropY" type="range" min="-100" max="100" step="1" />
+      </div>
 
       <button @click="saveProfile">保存修改</button>
       <p v-if="message">{{ message }}</p>
@@ -59,7 +56,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getMyFavoriteVideos, getMyUploadedVideos, updateMyProfile } from '@/api/user'
+import { getMyFavoriteVideos, getMyUploadedVideos, getMyWatchHistory, updateMyProfile } from '@/api/user'
 import { useAuth } from '@/composables/userAuth'
 import type { VideoListItem } from '@/types/video'
 
@@ -67,7 +64,7 @@ const route = useRoute()
 const router = useRouter()
 const { user, openAuthModal, updateUserProfile } = useAuth()
 
-const tab = ref<'info' | 'favorites' | 'uploads'>('info')
+const tab = ref<'info' | 'favorites' | 'uploads' | 'history'>('info')
 const loading = ref(false)
 const message = ref('')
 const videos = ref<VideoListItem[]>([])
@@ -98,19 +95,19 @@ watch(routeTab, (next) => {
 })
 
 async function syncTabAndLoad(next: string) {
-  const safeTab = next === 'favorites' || next === 'uploads' ? next : 'info'
+  const safeTab = next === 'favorites' || next === 'uploads' || next === 'history' ? next : 'info'
   tab.value = safeTab
   if (safeTab === 'info') return
   loading.value = true
   try {
-    const res = safeTab === 'favorites' ? await getMyFavoriteVideos() : await getMyUploadedVideos()
+    const res = safeTab === 'favorites' ? await getMyFavoriteVideos() : safeTab === 'history' ? await getMyWatchHistory() : await getMyUploadedVideos()
     videos.value = res.code === 200 ? res.data?.list || [] : []
   } finally {
     loading.value = false
   }
 }
 
-function setTab(next: 'info' | 'favorites' | 'uploads') {
+function setTab(next: 'info' | 'favorites' | 'uploads' | 'history') {
   router.replace({ query: { ...route.query, tab: next } })
 }
 

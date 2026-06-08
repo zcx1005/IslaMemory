@@ -212,3 +212,89 @@ CREATE TABLE `login_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='登录日志表';
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- =========================
+-- 增量功能表：分片上传、播放去重、历史记录、实时弹幕
+-- =========================
+CREATE TABLE IF NOT EXISTS `video_upload_sessions` (
+                                                       `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                       `upload_id` VARCHAR(40) NOT NULL,
+                                                       `user_id` BIGINT UNSIGNED NOT NULL,
+                                                       `title` VARCHAR(200) NOT NULL,
+                                                       `description` TEXT DEFAULT NULL,
+                                                       `category_id` BIGINT UNSIGNED NOT NULL,
+                                                       `filename` VARCHAR(255) NOT NULL,
+                                                       `ext` VARCHAR(16) NOT NULL,
+                                                       `total_size` BIGINT UNSIGNED NOT NULL,
+                                                       `chunk_size` BIGINT UNSIGNED NOT NULL,
+                                                       `total_chunks` INT NOT NULL,
+                                                       `uploaded_chunks` INT NOT NULL DEFAULT 0,
+                                                       `status` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0上传中 1已合并',
+                                                       `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                       `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                                       PRIMARY KEY (`id`),
+                                                       UNIQUE KEY `uk_upload_sessions_upload_id` (`upload_id`),
+                                                       KEY `idx_upload_sessions_user_id` (`user_id`),
+                                                       KEY `idx_upload_sessions_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='视频分片上传会话表';
+
+CREATE TABLE IF NOT EXISTS `video_upload_chunks` (
+                                                     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                     `upload_id` VARCHAR(40) NOT NULL,
+                                                     `index` INT NOT NULL,
+                                                     `size` BIGINT UNSIGNED NOT NULL,
+                                                     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                     PRIMARY KEY (`id`),
+                                                     UNIQUE KEY `uk_upload_chunk` (`upload_id`, `index`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='视频分片记录表';
+
+CREATE TABLE IF NOT EXISTS `video_play_events` (
+                                                   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                   `video_id` BIGINT UNSIGNED NOT NULL,
+                                                   `user_id` BIGINT UNSIGNED DEFAULT NULL,
+                                                   `viewer_key` VARCHAR(80) NOT NULL,
+                                                   `viewed_on` VARCHAR(10) NOT NULL,
+                                                   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                   PRIMARY KEY (`id`),
+                                                   UNIQUE KEY `uk_video_viewer_day` (`video_id`, `viewer_key`, `viewed_on`),
+                                                   KEY `idx_video_play_events_video_id` (`video_id`),
+                                                   KEY `idx_video_play_events_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='播放去重事件表';
+
+CREATE TABLE IF NOT EXISTS `video_watch_histories` (
+                                                       `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                       `video_id` BIGINT UNSIGNED NOT NULL,
+                                                       `user_id` BIGINT UNSIGNED NOT NULL,
+                                                       `progress_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+                                                       `last_watched_at` DATETIME NOT NULL,
+                                                       `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                       `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                                       PRIMARY KEY (`id`),
+                                                       UNIQUE KEY `uk_history_user_video` (`user_id`, `video_id`),
+                                                       KEY `idx_video_watch_histories_video_id` (`video_id`),
+                                                       KEY `idx_video_watch_histories_last_watched_at` (`last_watched_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='观看历史表';
+
+CREATE TABLE IF NOT EXISTS `video_danmakus` (
+                                                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                `video_id` BIGINT UNSIGNED NOT NULL,
+                                                `user_id` BIGINT UNSIGNED NOT NULL,
+                                                `content` VARCHAR(120) NOT NULL,
+                                                `time_ms` INT UNSIGNED NOT NULL,
+                                                `color` VARCHAR(16) NOT NULL DEFAULT '#ffffff',
+                                                `mode` VARCHAR(16) NOT NULL DEFAULT 'scroll',
+                                                `status` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                                                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                PRIMARY KEY (`id`),
+                                                KEY `idx_video_danmakus_video_time` (`video_id`, `time_ms`),
+                                                KEY `idx_video_danmakus_user_id` (`user_id`),
+                                                KEY `idx_video_danmakus_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='视频弹幕表';
+
+INSERT IGNORE INTO `categories` (`name`, `slug`, `sort_order`, `status`) VALUES
+                                                                             ('动画', 'animation', 10, 1),
+                                                                             ('音乐', 'music', 20, 1),
+                                                                             ('游戏', 'game', 30, 1),
+                                                                             ('影视', 'film', 40, 1),
+                                                                             ('知识', 'knowledge', 50, 1),
+                                                                             ('生活', 'life', 60, 1);

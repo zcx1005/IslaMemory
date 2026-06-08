@@ -25,6 +25,7 @@
         <div v-if="isLoggedIn && menuOpen" class="account-menu"  @mouseleave="menuOpen = false">
           <button @click="goProfile('info')">个人详情</button>
           <button @click="goProfile('favorites')">收藏视频页</button>
+          <button @click="goProfile('history')">历史观看</button>
           <button @click="openUpload">上传视频</button>
           <button @click="onLogout">退出</button>
         </div>
@@ -83,6 +84,7 @@
           <input type="file" accept="video/*" @change="onFileChange" required />
           <button type="submit" :disabled="uploadLoading">{{ uploadLoading ? '上传中...' : '上传' }}</button>
         </form>
+        <progress v-if="uploadLoading" :value="uploadProgress" max="100" class="upload-progress" />
         <p v-if="uploadMessage" class="modal-message">{{ uploadMessage }}</p>
       </div>
     </div>
@@ -93,20 +95,14 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { uploadVideo } from '@/api/user'
+import { getCategories } from '@/api/video'
+import type { CategoryItem } from '@/types/video'
 import { useAuth } from '@/composables/userAuth'
 
 const router = useRouter()
 const route = useRoute()
 
-const categories = [
-  { name: '全部', slug: '' },
-  { name: '动画', slug: 'animation' },
-  { name: '音乐', slug: 'music' },
-  { name: '游戏', slug: 'game' },
-  { name: '影视', slug: 'film' },
-  { name: '知识', slug: 'knowledge' },
-  { name: '生活', slug: 'life' },
-]
+const categories = ref<Array<Pick<CategoryItem, 'name' | 'slug'>>>([{ name: '全部', slug: '' }])
 
 const keyword = ref('')
 const selectedCategory = ref('')
@@ -114,6 +110,7 @@ const menuOpen = ref(false)
 const showUploadModal = ref(false)
 const uploadLoading = ref(false)
 const uploadMessage = ref('')
+const uploadProgress = ref(0)
 const uploadFile = ref<File | null>(null)
 const uploadForm = reactive({
   title: '',
@@ -141,6 +138,7 @@ const {
 
 onMounted(async () => {
   await restoreSession()
+  await loadCategories()
   syncFiltersFromRoute()
 })
 
@@ -150,6 +148,17 @@ watch(
       syncFiltersFromRoute()
     },
 )
+
+async function loadCategories() {
+  try {
+    const res = await getCategories()
+    if (res.code === 200) {
+      categories.value = [{ name: '全部', slug: '' }, ...(res.data || []).map((c) => ({ name: c.name, slug: c.slug }))]
+    }
+  } catch {
+    // 保留默认“全部”，避免分类服务异常时页面不可用
+  }
+}
 
 function syncFiltersFromRoute() {
   if (route.path !== '/') return
@@ -192,7 +201,7 @@ function onAccountEnter() {
   }
 }
 
-function goProfile(tab: 'info' | 'favorites' | 'uploads') {
+function goProfile(tab: 'info' | 'favorites' | 'uploads' | 'history') {
   menuOpen.value = false
   router.push({ path: '/profile', query: { tab } })
 }
@@ -252,14 +261,15 @@ async function submitUpload() {
   uploadLoading.value = true
   uploadMessage.value = ''
   try {
-    const res = await uploadVideo({ ...uploadForm, file: uploadFile.value })
+    const res = await uploadVideo({ ...uploadForm, file: uploadFile.value, onProgress: (p) => { uploadProgress.value = p; uploadMessage.value = `上传中 ${p}%` } })
     if (res.code === 200) {
-      uploadMessage.value = '上传成功'
+      uploadMessage.value = '上传成功，视频正在后台转码'
       showUploadModal.value = false
       uploadForm.title = ''
       uploadForm.description = ''
       uploadForm.category_slug = ''
       uploadFile.value = null
+      uploadProgress.value = 0
     } else {
       uploadMessage.value = res.msg || '上传失败'
     }

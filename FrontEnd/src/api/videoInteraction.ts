@@ -16,7 +16,7 @@ export function getInteractionState(publicId: string) {
 
 export function likeVideo(publicId: string) {
     assertPublicId(publicId)
-    return request.post<any, ApiResp<{ liked: boolean }>>(
+    return request.post<any, ApiResp<{ liked: boolean; changed?: boolean }>>(
         `/api/v1/videos/${publicId}/like`
     )
 }
@@ -30,7 +30,7 @@ export function unlikeVideo(publicId: string) {
 
 export function favoriteVideo(publicId: string) {
     assertPublicId(publicId)
-    return request.post<any, ApiResp<{ favorited: boolean }>>(
+    return request.post<any, ApiResp<{ favorited: boolean; changed?: boolean }>>(
         `/api/v1/videos/${publicId}/favorite`
     )
 }

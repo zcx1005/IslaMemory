@@ -76,3 +76,27 @@ func JWTAuth(jwtSvc *auth.JWTService, userSvc *user.Service) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func OptionalJWTAuth(jwtSvc *auth.JWTService, userSvc *user.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			c.Next()
+			return
+		}
+		claims, err := jwtSvc.ParseToken(parts[1])
+		if err == nil && claims.IssuedAt != nil {
+			if ok, checkErr := userSvc.IsTokenValidAfterPasswordChange(c.Request.Context(), claims.UserID, claims.IssuedAt.Time); checkErr == nil && ok {
+				c.Set("user_id", claims.UserID)
+				c.Set("username", claims.Username)
+				c.Set("role", claims.Role)
+			}
+		}
+		c.Next()
+	}
+}

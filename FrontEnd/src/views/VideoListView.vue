@@ -1,5 +1,10 @@
 <template>
   <section class="page">
+    <div class="toolbar">
+      <button :class="{ active: sort === 'recommend' }" @click="setSort('recommend')">默认推荐</button>
+      <button :class="{ active: sort === 'popular' }" @click="setSort('popular')">最热门</button>
+      <button :class="{ active: sort === 'latest' }" @click="setSort('latest')">最新</button>
+    </div>
     <div v-if="loading">加载中...</div>
     <div v-else-if="error">错误：{{ error }}</div>
     <div v-else-if="list.length === 0">暂无视频</div>
@@ -30,6 +35,7 @@ const router = useRouter()
 const loading = ref(true)
 const error = ref('')
 const list = ref<VideoListItem[]>([])
+const sort = ref<'recommend' | 'popular' | 'latest'>('recommend')
 
 onMounted(load)
 watch(
@@ -46,7 +52,7 @@ async function load() {
     const res = await getVideoList({
       page: 1,
       page_size: 30,
-      sort: 'latest',
+      sort: sort.value,
       keyword: String(route.query.keyword || ''),
       category_slug: String(route.query.category_slug || ''),
     })
@@ -57,6 +63,11 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function setSort(next: 'recommend' | 'popular' | 'latest') {
+  sort.value = next
+  load()
 }
 
 function goVideo(publicId: string) {
@@ -80,6 +91,9 @@ function formatPlayCount(count: number) {
 
 <style scoped>
 .page { padding-top: 16px; }
+.toolbar { display: flex; gap: 8px; margin: 0 0 14px; }
+.toolbar button { border: 1px solid #ddd; border-radius: 999px; background: #fff; padding: 6px 14px; cursor: pointer; }
+.toolbar button.active { background: #111; color: #fff; }
 .video-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .card { text-align: left; }
 .cover-wrap { position: relative; cursor: pointer; }

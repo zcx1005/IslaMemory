@@ -29,10 +29,11 @@ func main() {
 
 	redisClient, err := cache.NewRedis(cfg.Redis)
 	if err != nil {
-		log.Fatalf("connect redis failed: %v", err)
+		log.Printf("redis unavailable, continue without cache: %v", err)
+	} else {
+		_ = redisClient
+		log.Println("redis connected")
 	}
-
-	_ = redisClient
 
 	err = mysqlDB.AutoMigrate(
 		&user.User{},
@@ -41,13 +42,17 @@ func main() {
 		&like.VideoLike{},
 		&favorite.VideoFavorite{},
 		&comment.VideoComment{},
+		&video.UploadSession{},
+		&video.UploadChunk{},
+		&video.VideoPlayEvent{},
+		&video.VideoWatchHistory{},
+		&video.VideoDanmaku{},
 	)
 	if err != nil {
 		log.Fatalf("auto migrate failed: %v", err)
 	}
 
 	log.Println("mysql connected")
-	log.Println("redis connected")
 	log.Println("auto migrate success")
 
 	r := router.New(cfg, mysqlDB)

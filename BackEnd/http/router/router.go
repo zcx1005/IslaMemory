@@ -56,6 +56,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		userGroup.PUT("/me", userHandler.UpdateMe)
 		userGroup.GET("/me/favorites", userHandler.MyFavorites)
 		userGroup.GET("/me/uploads", userHandler.MyUploads)
+		userGroup.GET("/me/history", videoHandler.History)
 		userGroup.POST("/me/password", userHandler.ChangePassword)
 	}
 
@@ -79,11 +80,13 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// 公开视频接口
 	api.GET("/videos", videoHandler.List)
 	api.GET("/videos/:public_id", videoHandler.Detail)
-	api.POST("/videos/:public_id/play", videoHandler.IncreasePlay)
+	api.POST("/videos/:public_id/play", middleware.OptionalJWTAuth(jwtSvc, userSvc), videoHandler.IncreasePlay)
 
 	// 登录用户上视频接口
 	uploadGroup := api.Group("/videos")
 	uploadGroup.GET("/:public_id/comments", videoHandler.ListComments)
+	uploadGroup.GET("/:public_id/danmaku", videoHandler.ListDanmaku)
+	uploadGroup.GET("/:public_id/danmaku/stream", videoHandler.DanmakuStream)
 	uploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
 	{
 		uploadGroup.POST("/upload", videoHandler.Upload)
@@ -98,6 +101,16 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		// 评论（列表 + 发表评论/回复）
 		uploadGroup.POST("/:public_id/comments", videoHandler.CreateComment)
+		uploadGroup.POST("/:public_id/danmaku", videoHandler.CreateDanmaku)
+	}
+
+	videoUploadGroup := api.Group("/uploads/videos")
+	videoUploadGroup.Use(middleware.JWTAuth(jwtSvc, userSvc))
+	{
+		videoUploadGroup.POST("/init", videoHandler.InitChunkUpload)
+		videoUploadGroup.POST("/:upload_id/chunks/:index", videoHandler.UploadChunk)
+		videoUploadGroup.GET("/:upload_id", videoHandler.UploadStatus)
+		videoUploadGroup.POST("/:upload_id/complete", videoHandler.CompleteChunkUpload)
 	}
 
 	return r
