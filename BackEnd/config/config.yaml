@@ -1,0 +1,45 @@
+#HTTP设置
+#HTTP Configuration
+http:
+  port: 8080
+
+#MySQL 数据库连接配置文件
+#MySQL Database Connection Configuration File
+database:
+  host: 127.0.0.1 #数据库地址 - DataBase Address
+  port: 3306 #数据库端口 - DataBase Port
+  name: IslaData #数据库名 - DataBase Name
+  username: root #数据库账号 - DataBase Account
+  password: 2715004695 #数据库密码 - DataBase Password
+
+#Redis 设置
+#Redis Configuration
+redis:
+  host: 127.0.0.1 #连接地址 - Connection Address
+  port: 6379 #端口 - Port
+  password: 2715004695 #密码 - Password
+  db: 1 #默认连接的池 use default DB
+  max_active: 100 #最大连接数 - Max Connections
+
+#文件池路径
+#File Pool Path
+files:
+  max_size_mb: 3072 #视频最大上传文件大小 - Max Video Upload Size
+  user: #用户环境类 - User Path Class
+    avatar_dir: "F:/Isla_data/user/avatar/" #用户头像存放文件路径 - User Avatar Storage Path
+  video: #视频存放路径 - Video Storage Path
+    save_dir: "F:/Isla_data/video/save/" #视频存储位置 - Video Storage Location
+    temp_dir: "F:/Isla_data/video/temp/" #视频临时存储位置 - Temporary Video Storage Location
+    cover_dir: "F:/Isla_data/video/cover/" #视频封面存储位置 - Video Cover Storage Location
+  waste: #回收站 - Recycle bin
+    dir: "F:/Isla_data/waste/"
+  photo: #图片文件夹 - Photo Path
+    dir: "F:/Isla_data/photo/"
+
+#JWT 设置
+#JWT Configuration
+jwt:
+  key: "b8f1c7e1d9f34a72a6c1b4e9f0a2c8d3f6e7a9b1c2d4e5f6" #Token秘钥 - Token Key
+  issuer: "Awaffer" #颁发者签名 - Issuer Signature
+  subject: "IslaToken" #签名主题 - Signature Theme
+  expire_hours: 24 #过期时间(单位:小时) - Expired Time (Unit Hour)

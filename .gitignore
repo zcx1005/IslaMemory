@@ -38,8 +38,6 @@ Thumbs.db
 *.swo
 *~
 
-config/
-
 node_modules/
 dist/
 npm-debug.log*
