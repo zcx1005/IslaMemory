@@ -8,10 +8,15 @@ import (
 	"IslaMemory/BackEnd/internal/user"
 	"IslaMemory/BackEnd/internal/video"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
+func New(cfg *config.Config, db *gorm.DB, rdb ...*redis.Client) *gin.Engine {
+	var redisClient *redis.Client
+	if len(rdb) > 0 {
+		redisClient = rdb[0]
+	}
 	r := gin.Default()
 	r.Static("/static", "./storage")
 	r.GET("/ping", func(c *gin.Context) {
@@ -32,12 +37,12 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// 分类
 	categoryRepo := category.NewRepository(db)
 	categoryService := category.NewService(categoryRepo)
-	categoryHandler := category.NewHandler(categoryService)
+	categoryHandler := category.NewHandler(categoryService, redisClient)
 
 	// 视频
 	// video 模块依赖初始化
 	videoRepo := video.NewRepository(db)
-	videoService := video.NewService(videoRepo)
+	videoService := video.NewService(videoRepo, redisClient)
 	videoHandler := video.NewHandler(videoService)
 
 	api := r.Group("/api/v1")

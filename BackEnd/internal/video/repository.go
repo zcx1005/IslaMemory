@@ -557,3 +557,10 @@ func (r *Repository) ListDanmaku(ctx context.Context, videoID uint64) ([]VideoDa
 func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
+
+// ListPublicVideoPublicIDs 获取公开视频公开 ID，用于初始化 Redis Bitmap 布隆过滤器。
+func (r *Repository) ListPublicVideoPublicIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.basePublicQuery(ctx).Pluck("v.public_id", &ids).Error
+	return ids, err
+}

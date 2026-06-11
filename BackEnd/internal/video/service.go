@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"math"
 	"os"
 	"os/exec"
@@ -32,10 +33,17 @@ var (
 // 4. 对输入参数进行校验，并转换返回给前端的数据结构
 type Service struct {
 	repo *Repository
+	rdb  *redis.Client
 }
 
 // NewService 创建视频业务层实例
-func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+func NewService(repo *Repository, rdb ...*redis.Client) *Service {
+	var client *redis.Client
+	if len(rdb) > 0 {
+		client = rdb[0]
+	}
+	return &Service{repo: repo, rdb: client}
+}
 
 // ListInput 视频列表查询输入参数
 type ListInput struct {
@@ -209,9 +217,17 @@ func (s *Service) normalizeListInput(in ListInput) ListInput {
 // 先标准化分页参数，再调用 Repository 查询，最后转换为前端需要的结构
 func (s *Service) ListPublicVideos(ctx context.Context, in ListInput) ([]VideoListItem, int64, error) {
 	in = s.normalizeListInput(in)
+	if in.Sort == "latest" && in.CategorySlug == "" && in.Keyword == "" {
+		if list, total, ok := s.getLatestPublicVideosFromCache(ctx, in.Page, in.PageSize); ok {
+			return list, total, nil
+		}
+	}
 	rows, total, err := s.repo.ListPublicVideos(ctx, ListParams{Page: in.Page, PageSize: in.PageSize, CategorySlug: in.CategorySlug, Keyword: in.Keyword, Sort: in.Sort})
 	if err != nil {
 		return nil, 0, err
+	}
+	if in.Sort == "latest" && in.CategorySlug == "" && in.Keyword == "" {
+		s.cacheLatestPublicVideos(ctx, rows, total)
 	}
 	return toVideoList(rows), total, nil
 }
@@ -233,9 +249,18 @@ func toVideoList(rows []VideoRow) []VideoListItem {
 // GetPublicVideoDetail 根据公开 ID 获取视频详情
 // 如果转码播放地址为空，则回退使用原始视频地址播放
 func (s *Service) GetPublicVideoDetail(ctx context.Context, publicID string) (*VideoDetail, error) {
+	if !s.mightContainVideo(ctx, publicID) {
+		s.setCachedVideoMiss(ctx, publicID)
+		return nil, ErrVideoNotFound
+	}
+	if d, ok, err := s.getCachedDetail(ctx, publicID); ok || err != nil {
+		return d, err
+	}
+
 	row, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
 	if err != nil {
 		if IsNotFound(err) {
+			s.setCachedVideoMiss(ctx, publicID)
 			return nil, ErrVideoNotFound
 		}
 		return nil, err
@@ -249,6 +274,7 @@ func (s *Service) GetPublicVideoDetail(ctx context.Context, publicID string) (*V
 		t := row.PublishedAt.Format(timeFormat)
 		d.PublishedAt = &t
 	}
+	s.setCachedDetail(ctx, row, d)
 	return d, nil
 }
 
@@ -285,6 +311,8 @@ func (s *Service) CreateUploadedVideo(ctx context.Context, in CreateVideoInput) 
 	if err := s.repo.CreateVideo(ctx, video); err != nil {
 		return nil, err
 	}
+	s.addVideoBloom(ctx, video.PublicID)
+	s.invalidateVideoCache(ctx, video.PublicID)
 	return video, nil
 }
 
@@ -307,6 +335,7 @@ func (s *Service) transcodeVideo(ctx context.Context, publicID, src string) {
 	// 如果服务器没有安装 ffmpeg，则直接使用原始视频播放
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		_ = s.repo.UpdateVideoTranscode(ctx, publicID, map[string]any{"transcode_status": 2, "transcode_progress": 100, "playback_type": 0, "transcode_error": "ffmpeg not found, source playback enabled"})
+		s.invalidateVideoCache(ctx, publicID)
 		return
 	}
 
@@ -349,6 +378,7 @@ func (s *Service) transcodeVideo(ctx context.Context, publicID, src string) {
 	}
 
 	_ = s.repo.UpdateVideoTranscode(ctx, publicID, values)
+	s.invalidateVideoCache(ctx, publicID)
 }
 
 // RegisterPlay 记录视频播放行为
@@ -361,7 +391,14 @@ func (s *Service) RegisterPlay(ctx context.Context, publicID string, userID *uin
 		}
 		return false, err
 	}
-	return s.repo.CreatePlayAndHistory(ctx, row.ID, userID, viewerKey, time.Now().Format("2006-01-02"), progress)
+	counted, err := s.repo.CreatePlayAndHistory(ctx, row.ID, userID, viewerKey, time.Now().Format("2006-01-02"), progress)
+	if err == nil && counted {
+		s.invalidateVideoCache(ctx, publicID)
+		if userID != nil {
+			s.deleteHistoryCache(ctx, *userID)
+		}
+	}
+	return counted, err
 }
 
 // GetInteractionState 获取当前用户对视频的点赞和收藏状态
@@ -393,7 +430,11 @@ func (s *Service) LikeVideo(ctx context.Context, publicID string, userID uint64)
 		}
 		return false, err
 	}
-	return s.repo.LikeVideo(ctx, row.ID, userID)
+	changed, err := s.repo.LikeVideo(ctx, row.ID, userID)
+	if err == nil && changed {
+		s.invalidateVideoCache(ctx, publicID)
+	}
+	return changed, err
 }
 
 // UnlikeVideo 取消点赞视频
@@ -405,7 +446,11 @@ func (s *Service) UnlikeVideo(ctx context.Context, publicID string, userID uint6
 		}
 		return false, err
 	}
-	return s.repo.UnlikeVideo(ctx, row.ID, userID)
+	changed, err := s.repo.UnlikeVideo(ctx, row.ID, userID)
+	if err == nil && changed {
+		s.invalidateVideoCache(ctx, publicID)
+	}
+	return changed, err
 }
 
 // FavoriteVideo 收藏视频
@@ -417,7 +462,11 @@ func (s *Service) FavoriteVideo(ctx context.Context, publicID string, userID uin
 		}
 		return false, err
 	}
-	return s.repo.FavoriteVideo(ctx, row.ID, userID)
+	changed, err := s.repo.FavoriteVideo(ctx, row.ID, userID)
+	if err == nil && changed {
+		s.invalidateVideoCache(ctx, publicID)
+	}
+	return changed, err
 }
 
 // UnfavoriteVideo 取消收藏视频
@@ -429,7 +478,11 @@ func (s *Service) UnfavoriteVideo(ctx context.Context, publicID string, userID u
 		}
 		return false, err
 	}
-	return s.repo.UnfavoriteVideo(ctx, row.ID, userID)
+	changed, err := s.repo.UnfavoriteVideo(ctx, row.ID, userID)
+	if err == nil && changed {
+		s.invalidateVideoCache(ctx, publicID)
+	}
+	return changed, err
 }
 
 // timeFormat 统一时间格式
@@ -493,12 +546,18 @@ func (s *Service) CreateComment(ctx context.Context, in CreateCommentInput) (*Co
 		return nil, err
 	}
 
+	s.invalidateVideoCache(ctx, in.PublicID)
 	return &CommentItem{ID: cmt.ID, VideoID: cmt.VideoID, UserID: cmt.UserID, ParentID: cmt.ParentID, RootID: cmt.RootID, ReplyToUserID: cmt.ReplyToUserID, Content: cmt.Content, LikeCount: cmt.LikeCount, CreatedAt: cmt.CreatedAt.Format(timeFormat), UpdatedAt: cmt.UpdatedAt.Format(timeFormat), Replies: []CommentItem{}}, nil
 }
 
 // ListComments 获取视频评论列表
 // 将数据库中的扁平评论列表组装成“一级评论 + 回复列表”的结构
 func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentItem, error) {
+	var cached []CommentItem
+	if s.getJSONCache(ctx, fmt.Sprintf(videoCommentsFmt, publicID), &cached) {
+		return cached, nil
+	}
+
 	row, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
 	if err != nil {
 		if IsNotFound(err) {
@@ -540,6 +599,7 @@ func (s *Service) ListComments(ctx context.Context, publicID string) ([]CommentI
 		}
 	}
 
+	s.setJSONCache(ctx, fmt.Sprintf(videoCommentsFmt, publicID), roots, videoItemCacheTTL)
 	return roots, nil
 }
 
@@ -615,6 +675,16 @@ func (s *Service) UploadStatus(ctx context.Context, uploadID string, userID uint
 // 6. 删除临时分片目录
 // 7. 启动异步转码
 func (s *Service) CompleteChunkUpload(ctx context.Context, uploadID string, userID uint64, storageRoot string) (*UploadCompleteResult, error) {
+	var result *UploadCompleteResult
+	err := s.withRedisLock(ctx, "complete:"+uploadID, videoLockTTL, func() error {
+		var innerErr error
+		result, innerErr = s.completeChunkUploadLocked(ctx, uploadID, userID, storageRoot)
+		return innerErr
+	})
+	return result, err
+}
+
+func (s *Service) completeChunkUploadLocked(ctx context.Context, uploadID string, userID uint64, storageRoot string) (*UploadCompleteResult, error) {
 	sess, err := s.repo.GetUploadSession(ctx, uploadID, userID)
 	if err != nil {
 		return nil, ErrUploadNotFound
@@ -688,16 +758,35 @@ func (s *Service) ListHistory(ctx context.Context, userID uint64, page, pageSize
 	if pageSize <= 0 {
 		pageSize = 20
 	}
+	key := fmt.Sprintf(videoHistoryFmt, userID, page, pageSize)
+	var cached struct {
+		List  []VideoListItem `json:"list"`
+		Total int64           `json:"total"`
+	}
+	if s.getJSONCache(ctx, key, &cached) {
+		return cached.List, cached.Total, nil
+	}
 	rows, total, err := s.repo.ListHistory(ctx, userID, page, pageSize)
 	if err != nil {
 		return nil, 0, err
 	}
-	return toVideoList(rows), total, nil
+
+	list := toVideoList(rows)
+	s.setJSONCache(ctx, key, struct {
+		List  []VideoListItem `json:"list"`
+		Total int64           `json:"total"`
+	}{List: list, Total: total}, videoListCacheTTL)
+	return list, total, nil
 }
 
 // ListDanmaku 获取视频弹幕列表
 // 根据视频公开 ID 查询视频，再查询对应弹幕数据
 func (s *Service) ListDanmaku(ctx context.Context, publicID string) ([]DanmakuItem, error) {
+	var cached []DanmakuItem
+	if s.getJSONCache(ctx, fmt.Sprintf(videoDanmakuFmt, publicID), &cached) {
+		return cached, nil
+	}
+
 	row, err := s.repo.GetPublicVideoByPublicID(ctx, publicID)
 	if err != nil {
 		if IsNotFound(err) {
@@ -713,6 +802,7 @@ func (s *Service) ListDanmaku(ctx context.Context, publicID string) ([]DanmakuIt
 	for _, d := range rows {
 		out = append(out, DanmakuItem{ID: d.ID, PublicID: publicID, UserID: d.UserID, Content: d.Content, TimeMs: d.TimeMs, Color: d.Color, Mode: d.Mode, CreatedAt: d.CreatedAt.Format(timeFormat)})
 	}
+	s.setJSONCache(ctx, fmt.Sprintf(videoDanmakuFmt, publicID), out, videoItemCacheTTL)
 	return out, nil
 }
 
@@ -747,6 +837,9 @@ func (s *Service) CreateDanmaku(ctx context.Context, in CreateDanmakuInput) (*Da
 	d := &VideoDanmaku{VideoID: row.ID, UserID: in.UserID, Content: content, TimeMs: in.TimeMs, Color: color, Mode: mode, Status: 1}
 	if err := s.repo.CreateDanmaku(ctx, d); err != nil {
 		return nil, err
+	}
+	if s.redisEnabled() {
+		_ = s.rdb.Del(ctx, fmt.Sprintf(videoDanmakuFmt, in.PublicID)).Err()
 	}
 	return &DanmakuItem{ID: d.ID, PublicID: in.PublicID, UserID: d.UserID, Content: d.Content, TimeMs: d.TimeMs, Color: d.Color, Mode: d.Mode, CreatedAt: d.CreatedAt.Format(timeFormat)}, nil
 }

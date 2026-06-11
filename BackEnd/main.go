@@ -55,7 +55,7 @@ func main() {
 	log.Println("mysql connected")
 	log.Println("auto migrate success")
 
-	r := router.New(cfg, mysqlDB)
+	r := router.New(cfg, mysqlDB, redisClient)
 
 	r.Use(middleware.CORS())
 
